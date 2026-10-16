@@ -1,0 +1,8 @@
+{
+  "id": "text-tools",
+  "name": "Text Tools",
+  "version": "1.0.0",
+  "description": "Change case of the selection and see reading stats. Also a living example of the Typo plugin API.",
+  "author": "Typo",
+  "main": "main.js"
+}
