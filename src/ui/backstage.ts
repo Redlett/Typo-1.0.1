@@ -1843,7 +1843,7 @@ function renderAbout(): HTMLElement {
         "div",
         { class: "pcard__head" },
         h("strong", {}, "Software Updates & Friend Auto-Sync"),
-        h("span", { class: "pcard__ver" }, "Installed: v1.0.1"),
+        h("span", { class: "pcard__ver" }, "Installed: v1.0.2"),
         h(
           "span",
           { class: `pill pill--${settings.updateRepo ? "active" : "disabled"}` },
@@ -1917,7 +1917,7 @@ function renderAbout(): HTMLElement {
   );
 
   wrap.append(
-    h("p", { class: "bs__lead" }, "Version 1.0.1 · Rust core (Tauri 2) · ProseMirror editing engine · native OpenXML .docx & PDF Studio Suite · Windows 11 COM Spellchecker."),
+    h("p", { class: "bs__lead" }, "Version 1.0.2 · Rust core (Tauri 2) · ProseMirror editing engine · native OpenXML .docx & PDF Studio Suite · Windows 11 COM Spellchecker."),
     h("h2", { class: "bs__subtitle" }, "Privacy & Software Updates"),
     h("div", { class: "plist" }, privacyCard, updateCard),
     h("h2", { class: "bs__subtitle" }, "Hardware & Rendering"),
