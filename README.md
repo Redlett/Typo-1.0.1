@@ -13,6 +13,12 @@
 - **100% Local & Private**: Zero telemetry, zero cloud accounts, and native Windows 11 offline COM spellcheck & proofing.
 - **Built-in Auto-Updater**: Check for new releases and install updates in-app via **File → About → Check for Updates**.
 
+<img width="1920" height="1140" alt="Screenshot 2026-10-16 221108" src="https://github.com/user-attachments/assets/01b716e0-803b-4755-8358-9000469cb635" />
+
+<img width="1920" height="1139" alt="Screenshot 2026-10-16 221252" src="https://github.com/user-attachments/assets/8ef30949-f876-4dfc-8cbe-488a56ac0809" />
+
+
+
 ---
 
 ##  Download & Install
