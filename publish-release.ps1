@@ -133,18 +133,10 @@ if (-not [string]::IsNullOrWhiteSpace($Repo)) {
         }
     } else {
         try {
-            $psi = New-Object System.Diagnostics.ProcessStartInfo("git", "credential fill")
-            $psi.RedirectStandardInput = $true
-            $psi.RedirectStandardOutput = $true
-            $psi.RedirectStandardError = $true
-            $psi.UseShellExecute = $false
-            $proc = [System.Diagnostics.Process]::Start($psi)
-            $credBytes = [System.Text.Encoding]::ASCII.GetBytes("protocol=https" + [char]10 + "host=github.com" + [char]10 + [char]10)
-            $proc.StandardInput.BaseStream.Write($credBytes, 0, $credBytes.Length)
-            $proc.StandardInput.BaseStream.Flush()
-            $proc.StandardInput.Close()
-            $credOut = $proc.StandardOutput.ReadToEnd()
-            $proc.WaitForExit()
+            $tmpCred = Join-Path $env:TEMP "typo_git_cred.txt"
+            [System.IO.File]::WriteAllBytes($tmpCred, [System.Text.Encoding]::ASCII.GetBytes("protocol=https`nhost=github.com`n`n"))
+            $credOut = cmd /c "git credential fill < `"$tmpCred`"" 2>$null
+            Remove-Item $tmpCred -Force -ErrorAction SilentlyContinue
             $tokenLine = ($credOut -split "`r?`n") | Where-Object { $_ -match '^password=' } | Select-Object -First 1
             if ($tokenLine) {
                 $token = $tokenLine -replace '^password=', ''
