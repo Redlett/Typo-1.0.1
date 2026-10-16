@@ -909,6 +909,8 @@ pub fn import_epub(bytes: &[u8]) -> Result<ImportedDocx, String> {
             header: Some(book_title),
             footer: None,
             page_numbers: Some(true),
+            doodle_under: None,
+            doodle_over: None,
         },
         defaults: DocDefaults {
             font_family: "Georgia".into(),

@@ -13,7 +13,7 @@ export interface DocumentPreset {
   subtitle: string;
   category: Exclude<PresetCategory, "all">;
   badge?: string;
-  previewStyle: "blank" | "academic" | "resume" | "table" | "letter" | "report" | "script" | "notes";
+  previewStyle: "blank" | "brainstorm" | "academic" | "resume" | "table" | "letter" | "report" | "script" | "notes";
   defaults?: Partial<DocDefaults>;
   page?: Partial<PageSettings>;
   html: string;
@@ -36,6 +36,23 @@ export const DOCUMENT_PRESETS: DocumentPreset[] = [
     category: "productivity",
     previewStyle: "blank",
     html: "<p></p>",
+  },
+
+  // 2. Brainstorm Canvas (Landscape + Pencil Draw Tool)
+  {
+    id: "brainstorm",
+    name: "Brainstorm",
+    subtitle: "Landscape · Pencil & Doodle Canvas",
+    category: "creative",
+    badge: "Draw & Sketch",
+    previewStyle: "brainstorm",
+    defaults: { fontFamily: "Calibri", fontSize: 12 },
+    page: {
+      size: "A4",
+      orientation: "landscape",
+      margins: { top: 0.6, right: 0.6, bottom: 0.6, left: 0.6 },
+    },
+    html: `<p></p>`,
   },
 
   // 2. APA 7th Edition Paper

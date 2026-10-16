@@ -281,33 +281,69 @@ async function readOsClipboardImageDataUrl(): Promise<string | null> {
 }
 
 /**
+ * Normalizes pasted plain text:
+ * 1. Collapses web/PDF tab runs and multi-space gaps (`\t`, `\u00A0`) into clean single spaces.
+ * 2. Splits oversized single-paragraph walls (> 750 chars) at sentence boundaries so
+ *    automatic page-break layout can cleanly flow paragraphs from Page 1 -> Page 2 -> Page 3.
+ */
+export function insertNormalizedText(editor: Editor, rawText: string): void {
+  const cleaned = rawText
+    .replace(/\r\n?/g, "\n")
+    .replace(/[\t\u00A0]+/g, " ");
+
+  const rawLines = cleaned.split(/\n+/);
+  const paragraphs: string[] = [];
+
+  for (const rawLine of rawLines) {
+    const line = rawLine.replace(/ {2,}/g, " ").trim();
+    if (!line) continue;
+
+    if (line.length <= 460) {
+      paragraphs.push(line);
+      continue;
+    }
+
+    // Split huge single-paragraph walls at sentence boundaries every ~420 chars
+    const sentences = line.split(/(?<=[.!?])\s+/);
+    let bucket = "";
+    for (const s of sentences) {
+      if (bucket && bucket.length + 1 + s.length > 420) {
+        paragraphs.push(bucket.trim());
+        bucket = s;
+      } else {
+        bucket = bucket ? `${bucket} ${s}` : s;
+      }
+    }
+    if (bucket.trim()) {
+      paragraphs.push(bucket.trim());
+    }
+  }
+
+  if (paragraphs.length === 0) return;
+
+  if (paragraphs.length === 1 && cleaned.indexOf("\n") === -1 && paragraphs[0].length < 260) {
+    editor.chain().focus().insertContent({ type: "text", text: paragraphs[0] }).run();
+  } else {
+    editor
+      .chain()
+      .focus()
+      .insertContent(
+        paragraphs.map((p) => ({
+          type: "paragraph",
+          content: [{ type: "text", text: p }],
+        })),
+      )
+      .run();
+  }
+  scheduleLayout();
+}
+
+/**
  * Explicitly pastes ONLY text (never pastes an image).
  * @param plainOnly When true, strips all formatting and inserts plain text.
  */
 export async function pasteTextContent(editor: Editor, plainOnly = false): Promise<void> {
   try {
-    if (!plainOnly && navigator.clipboard?.read) {
-      try {
-        const items = await navigator.clipboard.read();
-        for (const item of items) {
-          if (item.types.includes("text/html")) {
-            const blob = await item.getType("text/html");
-            const rawHtml = await blob.text();
-            // Strip any <img> tags so "Paste Text" strictly inserts text only
-            const cleanHtml = rawHtml.replace(/<img\b[^>]*>/gi, "").trim();
-            if (cleanHtml) {
-              editor.chain().focus().insertContent(cleanHtml).run();
-              scheduleLayout();
-              toast("Pasted formatted text", "success", 1400);
-              return;
-            }
-          }
-        }
-      } catch {
-        // Fall back to plain text below
-      }
-    }
-
     let text = await tauriReadText().catch(() => "");
     if (!text && navigator.clipboard?.readText) {
       text = await navigator.clipboard.readText().catch(() => "");
@@ -317,22 +353,7 @@ export async function pasteTextContent(editor: Editor, plainOnly = false): Promi
       return;
     }
 
-    const lines = text.replace(/\r\n?/g, "\n").split("\n");
-    if (lines.length === 1) {
-      editor.chain().focus().insertContent({ type: "text", text: lines[0] }).run();
-    } else {
-      editor
-        .chain()
-        .focus()
-        .insertContent(
-          lines.map((l) => ({
-            type: "paragraph",
-            content: l ? [{ type: "text", text: l }] : [],
-          })),
-        )
-        .run();
-    }
-    scheduleLayout();
+    insertNormalizedText(editor, text);
     toast(plainOnly ? "Pasted plain text" : "Pasted text", "success", 1400);
   } catch {
     toast("Couldn't read text from clipboard", "error", 2000);

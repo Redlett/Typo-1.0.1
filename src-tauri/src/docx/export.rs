@@ -133,7 +133,21 @@ pub fn export_docx(
 <w:document xmlns:w="{NS_W}" xmlns:r="{NS_R}" xmlns:wp="{NS_WP}" xmlns:a="{NS_A}" xmlns:pic="{NS_PIC}"><w:body>{body}<w:sectPr>{sect_refs}<w:pgSz w:w="{page_w}" w:h="{page_h}"{orient}/><w:pgMar w:top="{m_top}" w:right="{m_right}" w:bottom="{m_bottom}" w:left="{m_left}" w:header="708" w:footer="708" w:gutter="0"/><w:cols w:space="708"/><w:docGrid w:linePitch="360"/></w:sectPr></w:body></w:document>"#
     );
 
-    let parts = w.into_parts(document, title, header_xml, footer_xml);
+    let mut parts = w.into_parts(document, title, header_xml, footer_xml);
+    let under_str = page.doodle_under.as_deref().unwrap_or("").trim();
+    let over_str = page.doodle_over.as_deref().unwrap_or("").trim();
+    if !under_str.is_empty() || !over_str.is_empty() {
+        let doodle_xml = format!(
+            concat!(
+                r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>"#,
+                "\n",
+                r#"<typoDoodles under="{}" over="{}"/>"#
+            ),
+            esc(under_str),
+            esc(over_str)
+        );
+        parts.push(xml_part("customXml/typo_doodles.xml", doodle_xml));
+    }
     write_zip(parts)
 }
 
@@ -1495,6 +1509,8 @@ pub(crate) mod tests {
             header: Some("Confidential Header".into()),
             footer: Some("Typo Corp".into()),
             page_numbers: Some(true),
+            doodle_under: None,
+            doodle_over: None,
         }
     }
 

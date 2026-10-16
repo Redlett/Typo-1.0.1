@@ -59,6 +59,8 @@ import { insertPictureFromDialog } from "./contextmenu";
 import { toggleOutline, isOutlineOpen, toggleFocusMode, isFocusMode } from "./outline";
 import type { ImageWrapMode } from "../editor/image-node";
 import { BACKDROP_PRESETS, pickCustomBackgroundPhoto, pickCustomPaperTexture } from "../core/themes";
+import { isDoodleModeActive, toggleDoodleMode, enableDoodleMode, clearDoodles, getDoodleLayer } from "./doodle";
+import { isProjectSidebarOpen, toggleProjectSidebar } from "./projects";
 
 let lastTextColor: string | null = "#c00000";
 let lastHighlight: string | null = "#ffff00";
@@ -525,7 +527,7 @@ export function buildTabs(ribbon: Ribbon, editor: Editor, hooks: { applyTheme: (
     dropdown: () => tableGrid((rows, cols) => chain().insertTable({ rows, cols, withHeaderRow: false }).run()),
   });
 
-  const illus = insert.addGroup("Illustrations & Stickers");
+  const illus = insert.addGroup("Illustrations & Draw");
   illus.large({
     icon: "Image", label: "Picture",
     tip: "Insert a picture (drag anywhere in Free-Roam or snap to text wrap)",
@@ -536,6 +538,81 @@ export function buildTabs(ribbon: Ribbon, editor: Editor, hooks: { applyTheme: (
     label: "Stickers",
     tip: "Open Sticker Studio — insert cute built-in stickers or import your own sticker packs",
     onClick: () => openStickerStudioModal(editor),
+  });
+  illus.large({
+    icon: "Pencil",
+    label: "Draw",
+    tip: "Freehand Draw & Doodle on the canvas (Mouse, Windows Ink, Wacom Cintiq & SuperDisplay supported) — draw above or behind text & images!",
+    isActive: () => isDoodleModeActive(),
+    onClick: () => {
+      toggleDoodleMode();
+      ribbon.refresh();
+    },
+    dropdown: () =>
+      menu([
+        { heading: "Freehand Draw & Windows Ink" },
+        {
+          label: "Pencil (Sketch & Pressure)",
+          icon: "Pencil",
+          onSelect: () => {
+            enableDoodleMode("pencil");
+            ribbon.refresh();
+          },
+        },
+        {
+          label: "Ink Pen (Smooth Curves)",
+          icon: "PenTool",
+          onSelect: () => {
+            enableDoodleMode("pen");
+            ribbon.refresh();
+          },
+        },
+        {
+          label: "Highlighter Marker",
+          icon: "Highlighter",
+          onSelect: () => {
+            enableDoodleMode("highlighter");
+            ribbon.refresh();
+          },
+        },
+        {
+          label: "Doodle Eraser (Erases Only Doodles)",
+          icon: "Eraser",
+          onSelect: () => {
+            enableDoodleMode("eraser");
+            ribbon.refresh();
+          },
+        },
+        "sep",
+        { heading: "Drawing Layer Order" },
+        {
+          label: "Draw Above Text & Images",
+          icon: "Layers",
+          checked: getDoodleLayer() === "over",
+          onSelect: () => {
+            enableDoodleMode(undefined, "over");
+            ribbon.refresh();
+          },
+        },
+        {
+          label: "Draw Behind Text & Images",
+          icon: "Layers",
+          checked: getDoodleLayer() === "under",
+          onSelect: () => {
+            enableDoodleMode(undefined, "under");
+            ribbon.refresh();
+          },
+        },
+        "sep",
+        {
+          label: "Clear All Doodles on Page",
+          icon: "Trash2",
+          onSelect: () => {
+            clearDoodles("all");
+            ribbon.refresh();
+          },
+        },
+      ]),
   });
   illus.large({
     icon: "Move",
@@ -1471,6 +1548,16 @@ export function buildTabs(ribbon: Ribbon, editor: Editor, hooks: { applyTheme: (
     },
   });
   show.large({
+    icon: "FolderOpen",
+    label: "Projects",
+    tip: "Toggle Writer's Project Pages sidebar (or create a new Project folder)",
+    isActive: () => isProjectSidebarOpen(),
+    onClick: () => {
+      toggleProjectSidebar();
+      ribbon.refresh();
+    },
+  });
+  show.large({
     icon: "ListTree",
     label: "Outline",
     shortcut: "Ctrl+Shift+O",
@@ -1515,12 +1602,21 @@ export function buildTabs(ribbon: Ribbon, editor: Editor, hooks: { applyTheme: (
     icon: "Scan",
     label: "Margin guides",
     showLabel: true,
+    tip: "Show or hide dashed margin boundary boxes and corner crop marks on every page",
     isActive: () => Boolean(settings.showMarginGuides),
     onClick: () => {
       settings.showMarginGuides = !settings.showMarginGuides;
       saveSettings();
       hooks.applyTheme();
+      scheduleLayout();
       ribbon.refresh();
+      toast(
+        settings.showMarginGuides
+          ? "Margin guides ON — showing printable margin boundaries on all pages"
+          : "Margin guides hidden",
+        "info",
+        1600,
+      );
     },
   });
   show.small(s2, {

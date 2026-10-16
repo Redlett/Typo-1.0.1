@@ -532,6 +532,149 @@ async fn save_edited_pdf(
     .map_err(err)?
 }
 
+// ---------------------------------------------------------------------------
+// Writer Projects (Folder-based multi-page workspace)
+// ---------------------------------------------------------------------------
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectFileEntry {
+    pub name: String,
+    pub path: String,
+    pub ext: String,
+    pub modified_ms: u64,
+    pub size_bytes: u64,
+}
+
+fn resolve_default_projects_root(app: &AppHandle) -> CmdResult<PathBuf> {
+    let docs = app
+        .path()
+        .document_dir()
+        .unwrap_or_else(|_| PathBuf::from("."));
+    let root = docs.join("Typo Projects");
+    Ok(root)
+}
+
+#[tauri::command]
+fn default_projects_dir(app: AppHandle) -> CmdResult<String> {
+    Ok(resolve_default_projects_root(&app)?
+        .to_string_lossy()
+        .into_owned())
+}
+
+#[tauri::command]
+fn create_project_folder(
+    app: AppHandle,
+    parent_dir: Option<String>,
+    name: String,
+) -> CmdResult<String> {
+    let clean_name: String = name
+        .trim()
+        .chars()
+        .map(|c| match c {
+            '<' | '>' | ':' | '"' | '/' | '\\' | '|' | '?' | '*' => '-',
+            _ => c,
+        })
+        .collect();
+    if clean_name.is_empty() {
+        return Err("Project name cannot be empty.".into());
+    }
+    let base = match parent_dir {
+        Some(ref p) if !p.trim().is_empty() => PathBuf::from(p.trim()),
+        _ => resolve_default_projects_root(&app)?,
+    };
+    fs::create_dir_all(&base).map_err(err)?;
+    let target = base.join(&clean_name);
+    fs::create_dir_all(&target).map_err(err)?;
+    Ok(target.to_string_lossy().into_owned())
+}
+
+#[tauri::command]
+fn list_project_files(folder_path: String) -> CmdResult<Vec<ProjectFileEntry>> {
+    let dir = PathBuf::from(&folder_path);
+    if !dir.is_dir() {
+        return Err("Project folder does not exist.".into());
+    }
+    let allowed = [
+        "docx", "docm", "dotx", "md", "markdown", "txt", "html", "htm", "epub", "pdf",
+    ];
+    let mut entries = Vec::new();
+    for item in fs::read_dir(&dir).map_err(err)?.flatten() {
+        let p = item.path();
+        if !p.is_file() {
+            continue;
+        }
+        let fname = file_name(&p);
+        if fname.starts_with('.') || fname.starts_with("~$") {
+            continue;
+        }
+        let ext = p
+            .extension()
+            .map(|e| e.to_string_lossy().to_lowercase())
+            .unwrap_or_default();
+        if !allowed.contains(&ext.as_str()) {
+            continue;
+        }
+        let meta = fs::metadata(&p).ok();
+        let size_bytes = meta.as_ref().map(|m| m.len()).unwrap_or(0);
+        let modified_ms = meta
+            .and_then(|m| m.modified().ok())
+            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+            .map(|d| d.as_millis() as u64)
+            .unwrap_or(0);
+        entries.push(ProjectFileEntry {
+            name: fname,
+            path: p.to_string_lossy().into_owned(),
+            ext,
+            modified_ms,
+            size_bytes,
+        });
+    }
+    entries.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+    Ok(entries)
+}
+
+#[tauri::command]
+fn delete_project_file(path: String) -> CmdResult<()> {
+    let p = PathBuf::from(&path);
+    if p.is_file() {
+        fs::remove_file(&p).map_err(err)?;
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn rename_project_file(old_path: String, new_name: String) -> CmdResult<String> {
+    let old = PathBuf::from(&old_path);
+    if !old.is_file() {
+        return Err("File does not exist.".into());
+    }
+    let parent = old.parent().ok_or("Invalid file path")?;
+    let orig_ext = old
+        .extension()
+        .map(|e| e.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "docx".into());
+    let mut clean: String = new_name
+        .trim()
+        .chars()
+        .map(|c| match c {
+            '<' | '>' | ':' | '"' | '/' | '\\' | '|' | '?' | '*' => '-',
+            _ => c,
+        })
+        .collect();
+    if clean.is_empty() {
+        return Err("New file name cannot be empty.".into());
+    }
+    if Path::new(&clean).extension().is_none() {
+        clean = format!("{clean}.{orig_ext}");
+    }
+    let target = parent.join(&clean);
+    if target != old {
+        fs::rename(&old, &target).map_err(err)?;
+    }
+    Ok(target.to_string_lossy().into_owned())
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UpdateCheckResult {
@@ -910,6 +1053,11 @@ pub fn run() {
             save_edited_pdf,
             check_app_update,
             install_app_update,
+            default_projects_dir,
+            create_project_folder,
+            list_project_files,
+            delete_project_file,
+            rename_project_file,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Typo");

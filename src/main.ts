@@ -36,6 +36,7 @@ import {
   duplicateSelectedImage,
   pasteTextContent,
   pasteImageContent,
+  insertNormalizedText,
 } from "./core/clipboard";
 import { initMiniToolbar } from "./ui/minitoolbar";
 import { openDictionary, openProofingPanel } from "./ui/dictionary";
@@ -174,8 +175,14 @@ async function boot(): Promise<void> {
       const htmlHasStandaloneImg = /<img\b/i.test(htmlText) && plainText.trim().length === 0;
 
       // If clipboard has text and wasn't explicitly copied as an image inside Typo,
-      // let ProseMirror paste the text normally (even if Office/OS attached a bitmap preview).
+      // normalize web tables, tabs, multi-space gaps, and long paragraphs so text
+      // wraps and paginates cleanly across pages without weird gaps or cutoffs.
       if (plainText.trim().length > 0 && !htmlHasStandaloneImg && getLastCopiedKind() !== "image") {
+        if (plainText.length > 200 || /[\t\u00A0\n]| {2,}/.test(plainText) || /<table\b/i.test(htmlText)) {
+          e.preventDefault();
+          e.stopPropagation();
+          insertNormalizedText(editor, plainText);
+        }
         return;
       }
 

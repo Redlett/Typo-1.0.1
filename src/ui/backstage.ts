@@ -33,6 +33,7 @@ import {
   confirmDiscard,
 } from "../core/document";
 import { openPdfEditorModal } from "./pdf-editor";
+import { buildProjectsBackstageSection } from "./projects";
 import { DOCUMENT_PRESETS, PRESET_CATEGORIES, type DocumentPreset, type PresetCategory } from "../core/presets";
 import { plugins, setPluginEnabled } from "../core/plugins";
 import { ACCENT_PRESETS, BACKDROP_PRESETS, pickCustomBackgroundPhoto, pickCustomPaperTexture, themeToJson, type Theme } from "../core/themes";
@@ -46,7 +47,7 @@ export interface BackstageHooks {
   reloadPlugins: () => Promise<void>;
 }
 
-type Page = "home" | "open" | "export" | "themes" | "plugins" | "about";
+type Page = "home" | "projects" | "open" | "export" | "themes" | "plugins" | "about";
 type StudioTabId = "palettes" | "paper" | "interface" | "backdrop" | "json";
 
 let root: HTMLElement;
@@ -86,7 +87,8 @@ export function initBackstage(h0: BackstageHooks): void {
       closeBackstage();
     }
   });
-  page("open", "Open", "FolderOpen");
+  page("projects", "Projects", "FolderOpen");
+  page("open", "Open", "Folder");
   action("Save", "Save", async () => {
     if (await save()) closeBackstage();
   });
@@ -152,6 +154,8 @@ function render(p: Page): HTMLElement {
     case "home":
     case "open":
       return renderOpen(p === "home");
+    case "projects":
+      return renderProjectsPage();
     case "export":
       return renderExport();
     case "themes":
@@ -161,6 +165,21 @@ function render(p: Page): HTMLElement {
     case "about":
       return renderAbout();
   }
+}
+
+function renderProjectsPage(): HTMLElement {
+  const wrap = h(
+    "div",
+    { class: "bs__page" },
+    h("h1", { class: "bs__title" }, "Writer's Projects"),
+    h(
+      "p",
+      { class: "bs__sub" },
+      "Create a dedicated folder on your PC for your book, story, or research — then add pages and brainstorm sheets inside it with one click.",
+    ),
+    buildProjectsBackstageSection(closeBackstage),
+  );
+  return wrap;
 }
 
 function fmtTime(t: number): string {
@@ -180,6 +199,14 @@ function buildMiniSheetPreview(preset: DocumentPreset): HTMLElement {
   switch (preset.previewStyle) {
     case "blank":
       inner.append(h("div", { class: "tpl__plus" }, icon("Plus", 20)));
+      break;
+    case "brainstorm":
+      inner.append(
+        h("div", { class: "tpl__brainstorm-preview" },
+          icon("Pencil", 20),
+          h("span", {}, "Landscape Sketch"),
+        ),
+      );
       break;
     case "academic":
       inner.append(

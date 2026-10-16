@@ -7,6 +7,8 @@ import { PAGE_SIZES, type PageBorderStyle } from "./native";
 import { state, emit, on, setDirty } from "./state";
 import { settings, saveSettings, type CanvasViewMode } from "./settings";
 import { h, icon, promptDialog, toast } from "../ui/dom";
+import { initDoodleEngine, syncDoodleCanvasDimensions } from "../ui/doodle";
+import { initProjectSidebar } from "../ui/projects";
 
 const DPI = 96;
 
@@ -17,6 +19,7 @@ let hfLayer: HTMLElement;
 let watermarkLayer: HTMLElement;
 let scratchpadEl: HTMLElement | null = null;
 let printStyle: HTMLStyleElement;
+let pageFlowStyle: HTMLStyleElement | null = null;
 let pageCount = 1;
 let laying = false;
 
@@ -722,7 +725,6 @@ export function initPage(): void {
 
   marginGuidesEl = document.createElement("div");
   marginGuidesEl.className = "page-margin-guides";
-  marginGuidesEl.innerHTML = `<i class="mg mg--tl"></i><i class="mg mg--tr"></i><i class="mg mg--bl"></i><i class="mg mg--br"></i>`;
   sheet.insertBefore(marginGuidesEl, editorHost);
 
   spreadSpineEl = document.createElement("div");
@@ -732,9 +734,16 @@ export function initPage(): void {
   spreadSpineEl.innerHTML = `<span class="spread-spine__tag spread-spine__tag--left">Left Page</span><i class="spread-spine__line"></i><span class="spread-spine__tag spread-spine__tag--right">Right Page</span>`;
   sheet.insertBefore(spreadSpineEl, editorHost);
 
+  initDoodleEngine(sheet, editorHost);
+  initProjectSidebar();
+
   printStyle = document.createElement("style");
   printStyle.id = "print-page";
   document.head.append(printStyle);
+
+  pageFlowStyle = document.createElement("style");
+  pageFlowStyle.id = "page-flow-style";
+  document.head.append(pageFlowStyle);
 
   const wrap = document.getElementById("sheet-wrap");
   if (wrap && !document.getElementById("page-ruler")) {
@@ -770,6 +779,7 @@ export function initPage(): void {
 
   new ResizeObserver(() => scheduleLayout()).observe(editorHost);
   on("page:change", () => applyPage());
+  on("proofing:update", () => scheduleLayout());
   applyPage();
   setZoom(settings.zoom, false);
 }
@@ -849,6 +859,30 @@ export function scheduleLayout(): void {
   });
 }
 
+function renderMarginGuides(n: number, h: number): void {
+  if (!marginGuidesEl) return;
+  marginGuidesEl.replaceChildren();
+  const m = state.page.margins;
+  const mTop = m.top * DPI;
+  const mRight = m.right * DPI;
+  const mBottom = m.bottom * DPI;
+  const mLeft = m.left * DPI;
+
+  for (let p = 1; p <= n; p++) {
+    const pageTop = (p - 1) * h;
+    const box = document.createElement("div");
+    box.className = "page-margin-box";
+    box.style.top = `${pageTop + mTop}px`;
+    box.style.left = `${mLeft}px`;
+    box.style.right = `${mRight}px`;
+    box.style.height = `${Math.max(40, h - mTop - mBottom)}px`;
+    box.innerHTML =
+      `<i class="mg mg--tl"></i><i class="mg mg--tr"></i><i class="mg mg--bl"></i><i class="mg mg--br"></i>` +
+      `<span class="page-margin-box__label">Margins: ${m.top.toFixed(2)}″ T · ${m.left.toFixed(2)}″ L · ${m.right.toFixed(2)}″ R · ${m.bottom.toFixed(2)}″ B</span>`;
+    marginGuidesEl.append(box);
+  }
+}
+
 function renderWatermarks(n: number, h: number): void {
   if (!watermarkLayer) return;
   watermarkLayer.replaceChildren();
@@ -918,44 +952,114 @@ function layout(): void {
   if (laying) return;
   laying = true;
   try {
-    const { h } = pageDims();
+    const { w, h } = pageDims();
+    const isSpread = settings.canvasViewMode === "spread";
+    const sheetW = isSpread ? Math.round(w * 1.65) : w;
     const mTop = state.page.margins.top * DPI;
     const mBottom = state.page.margins.bottom * DPI;
 
-    // Explicit page breaks: grow each break so the following block starts at the top
-    // margin of the next page. Measured sequentially because each one shifts the rest.
+    // 1. Reset previous auto-pagination pushes and explicit page break heights
+    if (pageFlowStyle) pageFlowStyle.textContent = "";
+    editorHost.querySelectorAll<HTMLElement>("[data-auto-page-push]").forEach((el) => {
+      el.style.marginTop = "";
+      delete el.dataset.autoPagePush;
+    });
     const breaks = editorHost.querySelectorAll<HTMLElement>(".page-break");
     breaks.forEach((br) => (br.style.height = ""));
-    const zoom = settings.zoom || 1;
-    breaks.forEach((br, idx) => {
-      const top = (br.getBoundingClientRect().top - sheet.getBoundingClientRect().top) / zoom;
-      const pageIdx = Math.max(1, Math.ceil((top + 1) / h));
-      const pageEnd = pageIdx * h;
-      const height = Math.max(36, pageEnd + mTop - top);
-      br.style.height = `${height}px`;
-      br.dataset.pageLabel = `Page ${pageIdx + 1}`;
-      br.dataset.breakIndex = String(idx + 1);
-    });
+
+    const sRect0 = sheet.getBoundingClientRect();
+    const rectScale = sRect0.width > 0 ? sRect0.width / sheetW : (settings.zoom || 1);
+
+    // 2. Sequentially paginate explicit .page-break nodes AND overflowing blocks
+    //    so paragraphs/headings/tables jump cleanly across the page gap from
+    //    Page N's bottom margin to Page (N+1)'s top margin.
+    const pm = editorHost.querySelector<HTMLElement>(".ProseMirror");
+    const flowRules: string[] = [];
+    let breakIdx = 0;
+    if (pm) {
+      const children = Array.from(pm.children) as HTMLElement[];
+      for (let i = 0; i < children.length; i++) {
+        const child = children[i];
+        const sheetTop = sheet.getBoundingClientRect().top;
+        const rect = child.getBoundingClientRect();
+        const top = (rect.top - sheetTop) / rectScale;
+        const bottom = (rect.bottom - sheetTop) / rectScale;
+
+        if (child.classList.contains("page-break")) {
+          breakIdx++;
+          const pageIdx = Math.max(1, Math.ceil((top + 1) / h));
+          const pageEnd = pageIdx * h;
+          const height = Math.max(36, Math.ceil(pageEnd + mTop - top));
+          child.style.height = `${height}px`;
+          flowRules.push(`#sheet .ProseMirror > :nth-child(${i + 1}) { height: ${height}px !important; }`);
+          child.dataset.pageLabel = `Page ${pageIdx + 1}`;
+          child.dataset.breakIndex = String(breakIdx);
+          continue;
+        }
+
+        const pageIdx = Math.max(1, Math.floor(top / h) + 1);
+        const pageStartPrintable = (pageIdx - 1) * h + mTop;
+        const pageEndPrintable = pageIdx * h - mBottom;
+        const nextPageStartPrintable = pageIdx * h + mTop;
+
+        // If block starts inside the top margin of Page 2+, push it down to the page's top printable margin
+        if (pageIdx > 1 && top < pageStartPrintable - 2) {
+          const pushPx = Math.max(12, Math.ceil(pageStartPrintable - top + 11));
+          child.style.setProperty("margin-top", `${pushPx}px`, "important");
+          child.dataset.autoPagePush = "1";
+          flowRules.push(`#sheet .ProseMirror > :nth-child(${i + 1}) { margin-top: ${pushPx}px !important; }`);
+          continue;
+        }
+
+        // If block crosses into the bottom margin / page break zone and isn't already at the very top of the page,
+        // push it cleanly onto the top margin of the next page.
+        if (bottom > pageEndPrintable && top > pageStartPrintable + 14) {
+          const pushPx = Math.max(16, Math.ceil(nextPageStartPrintable - top + 11));
+          child.style.setProperty("margin-top", `${pushPx}px`, "important");
+          child.dataset.autoPagePush = "1";
+          flowRules.push(`#sheet .ProseMirror > :nth-child(${i + 1}) { margin-top: ${pushPx}px !important; }`);
+        }
+      }
+    }
+    if (pageFlowStyle) {
+      pageFlowStyle.textContent = flowRules.join("\n");
+    }
 
     const contentH = editorHost.offsetHeight + mTop + mBottom;
     const n = Math.max(1, Math.ceil((contentH - 1) / h));
     sheet.style.minHeight = `${n * h}px`;
 
-    if (n !== pageCount || markers.childElementCount !== n - 1) {
-      pageCount = n;
-      markers.replaceChildren();
-      for (let k = 1; k < n; k++) {
-        const line = document.createElement("div");
-        line.className = "page-marker";
-        line.style.top = `${k * h}px`;
-        line.dataset.page = `Page ${k + 1}`;
-        markers.append(line);
-      }
-      emit("page:count", n);
-    }
+    pageCount = n;
+    markers.replaceChildren();
+    const sRectFinal = sheet.getBoundingClientRect();
+    const scaleFinal = sRectFinal.width > 0 ? sRectFinal.width / sheetW : rectScale;
+    const blockRects = pm
+      ? Array.from(pm.children)
+          .filter((el) => !el.classList.contains("page-break"))
+          .map((el) => {
+            const r = el.getBoundingClientRect();
+            return {
+              top: (r.top - sRectFinal.top) / scaleFinal,
+              bottom: (r.bottom - sRectFinal.top) / scaleFinal,
+            };
+          })
+      : [];
 
+    for (let k = 1; k < n; k++) {
+      const boundaryY = k * h;
+      const straddled = blockRects.some((b) => b.top < boundaryY - 6 && b.bottom > boundaryY + 6);
+      const line = document.createElement("div");
+      line.className = straddled ? "page-marker page-marker--passthrough" : "page-marker";
+      line.style.top = `${boundaryY}px`;
+      line.dataset.page = `Page ${k + 1}`;
+      markers.append(line);
+    }
+    emit("page:count", n);
+
+    renderMarginGuides(n, h);
     renderWatermarks(n, h);
     renderHeadersAndFooters(n, h);
+    syncDoodleCanvasDimensions(sheetW, n * h);
   } finally {
     laying = false;
   }
@@ -964,11 +1068,13 @@ function layout(): void {
 /** Page index (1-based) where the caret currently is. */
 export function currentPage(): number {
   try {
-    const { h } = pageDims();
+    const { w, h } = pageDims();
+    const isSpread = settings.canvasViewMode === "spread";
+    const sheetW = isSpread ? Math.round(w * 1.65) : w;
     const coords = state.editor.view.coordsAtPos(state.editor.state.selection.head);
     const r = sheet.getBoundingClientRect();
-    const zoom = settings.zoom || 1;
-    const y = (coords.top - r.top) / zoom;
+    const scale = r.width > 0 ? r.width / sheetW : (settings.zoom || 1);
+    const y = (coords.top - r.top) / scale;
     return Math.min(pageCount, Math.max(1, Math.floor(y / h) + 1));
   } catch {
     return 1;
@@ -982,7 +1088,8 @@ export function setZoom(
 ): void {
   const prevZoom = settings.zoom || 1;
   const clamped = Math.round(Math.min(4, Math.max(0.35, z)) * 200) / 200;
-  if (Math.abs(clamped - prevZoom) < 0.001) return;
+  const currentApplied = parseFloat(sheet?.style.getPropertyValue("zoom") || "0");
+  if (Math.abs(clamped - prevZoom) < 0.001 && Math.abs(clamped - currentApplied) < 0.001) return;
 
   const canvas = document.getElementById("canvas");
   let anchorY = 0;

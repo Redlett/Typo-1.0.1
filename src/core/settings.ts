@@ -3,6 +3,7 @@ import { native, type PageSettings } from "./native";
 import { DEFAULT_THEME_ID } from "./themes";
 
 export interface RecentFile { path: string; name: string; time: number }
+export interface RecentProject { path: string; name: string; time: number }
 
 export type PaperColorMode = "auto" | "white" | "sepia" | "mist" | "parchment" | "custom";
 export type UiDensity = "compact" | "comfortable" | "spacious";
@@ -108,6 +109,11 @@ export interface Settings {
   strictOfflinePrivacy: boolean;
   updateRepo: string;
   autoCheckUpdates: boolean;
+  activeProjectFolder: string;
+  projectSidebarOpen: boolean;
+  recentProjects: RecentProject[];
+  printColorMode: "color" | "bw";
+  printBwWhitePaper: boolean;
   recent: RecentFile[];
   plugins: Record<string, boolean>;
 }
@@ -169,6 +175,11 @@ export const DEFAULT_SETTINGS: Settings = {
   strictOfflinePrivacy: true,
   updateRepo: "Redlett/Typo-1.0.1",
   autoCheckUpdates: true,
+  activeProjectFolder: "",
+  projectSidebarOpen: false,
+  recentProjects: [],
+  printColorMode: "color",
+  printBwWhitePaper: false,
   recent: [],
   plugins: {},
 };
@@ -184,6 +195,7 @@ export async function loadSettings(): Promise<Settings> {
       if (!Array.isArray(settings.userDictionary)) settings.userDictionary = [];
       if (!Array.isArray(settings.savedMarginPresets)) settings.savedMarginPresets = [];
       if (!Array.isArray(settings.customStickers)) settings.customStickers = [];
+      if (!Array.isArray(settings.recentProjects)) settings.recentProjects = [];
       if (!Array.isArray(settings.customSnippets)) settings.customSnippets = structuredClone(DEFAULT_SETTINGS.customSnippets);
       if (!settings.customThemeColors || typeof settings.customThemeColors !== "object") {
         settings.customThemeColors = structuredClone(DEFAULT_CUSTOM_THEME);
@@ -221,5 +233,22 @@ export function removeRecent(path: string): void {
 
 export function clearRecent(): void {
   settings.recent = [];
+  saveSettings();
+}
+
+export function pushRecentProject(path: string, name: string): void {
+  settings.recentProjects = [
+    { path, name, time: Date.now() },
+    ...settings.recentProjects.filter((p) => p.path.toLowerCase() !== path.toLowerCase()),
+  ].slice(0, 20);
+  saveSettings();
+}
+
+export function removeRecentProject(path: string): void {
+  settings.recentProjects = settings.recentProjects.filter((p) => p.path.toLowerCase() !== path.toLowerCase());
+  if (settings.activeProjectFolder.toLowerCase() === path.toLowerCase()) {
+    settings.activeProjectFolder = "";
+    settings.projectSidebarOpen = false;
+  }
   saveSettings();
 }

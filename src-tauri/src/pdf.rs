@@ -1628,6 +1628,8 @@ pub fn build_imported_docx_from_pdf_pages(pages: &[PdfEditorPage]) -> ImportedDo
             header: None,
             footer: None,
             page_numbers: None,
+            doodle_under: None,
+            doodle_over: None,
         },
         defaults: DocDefaults {
             font_family: "Calibri".into(),

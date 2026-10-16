@@ -16,7 +16,9 @@ export type AppEvent =
   | "proofing:update"
   | "outline:change"
   | "focus:change"
-  | "tabs:change";
+  | "tabs:change"
+  | "doodle:change"
+  | "project:change";
 
 export const state = {
   editor: null as unknown as Editor,

@@ -3,7 +3,7 @@ import StarterKit from "@tiptap/starter-kit";
 import { TextStyle, FontFamily, FontSize, Color } from "@tiptap/extension-text-style";
 import { TableKit } from "@tiptap/extension-table";
 import { TaskList, TaskItem } from "@tiptap/extension-list";
-import { Placeholder, CharacterCount } from "@tiptap/extensions";
+import { CharacterCount } from "@tiptap/extensions";
 import TextAlign from "@tiptap/extension-text-align";
 import Highlight from "@tiptap/extension-highlight";
 import Subscript from "@tiptap/extension-subscript";
@@ -61,7 +61,6 @@ export function createEditor(element: HTMLElement, onUpdate: () => void, onSelec
         inline: true,
         allowBase64: true,
       }),
-      Placeholder.configure({ placeholder: "Start writing…", showOnlyWhenEditable: true, showOnlyCurrent: true }),
       CharacterCount,
       ParagraphFormat,
       PageBreak,

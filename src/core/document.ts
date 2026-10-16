@@ -1,14 +1,15 @@
 /** Document lifecycle: multi-document tabs, new / open / save / save as / export / print. */
-import { open as openDialog, save as saveDialog, message } from "@tauri-apps/plugin-dialog";
+import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
 import { marked } from "marked";
 import TurndownService from "turndown";
 import { EditorState } from "@tiptap/pm/state";
 import { native, type ImportedDocx, type PageSettings, type ParsedPdfDocument } from "./native";
-import { settings, pushRecent } from "./settings";
+import { settings, saveSettings, pushRecent } from "./settings";
 import { state, emit, on, setDirty } from "./state";
-import { toast } from "../ui/dom";
+import { h, icon, toast } from "../ui/dom";
 import type { DocumentPreset } from "./presets";
 import { renderPdfPagesWithPdfJs, buildDocxFromPdfPages } from "../ui/pdf-editor";
+import { commitDoodleToPageState, enableDoodleMode, toggleDoodleMode } from "../ui/doodle";
 
 export type ExportFormat = "docx" | "epub" | "pdf" | "html" | "md" | "txt";
 
@@ -33,11 +34,13 @@ function nextTabId(): string {
 function isCurrentDocEmpty(): boolean {
   if (!state.editor) return true;
   const text = state.editor.getText().trim();
-  return text.length === 0 && state.editor.state.doc.childCount <= 1;
+  const hasDoodles = Boolean(state.page.doodleUnder || state.page.doodleOver);
+  return text.length === 0 && state.editor.state.doc.childCount <= 1 && !hasDoodles;
 }
 
 export function syncActiveTabSnapshot(): void {
   if (!state.editor) return;
+  commitDoodleToPageState(false);
   let cur = docTabs.find((t) => t.id === activeTabId);
   if (!cur) {
     cur = {
@@ -90,11 +93,13 @@ export function getActiveTabId(): string {
   return activeTabId;
 }
 
-export function switchToTab(id: string): void {
-  if (id === activeTabId) return;
+export function switchToTab(id: string, skipSyncCurrent = false): void {
+  if (id === activeTabId && !skipSyncCurrent) return;
   const target = docTabs.find((t) => t.id === id);
   if (!target) return;
-  syncActiveTabSnapshot();
+  if (!skipSyncCurrent && activeTabId) {
+    syncActiveTabSnapshot();
+  }
   activeTabId = target.id;
   state.path = target.path;
   state.name = target.name;
@@ -146,12 +151,16 @@ export async function closeTab(id: string): Promise<void> {
   if (tab.dirty) {
     const prevId = activeTabId;
     if (id !== activeTabId) switchToTab(id);
-    const ok = await confirmDiscard();
+    const ok = await confirmDiscard(tab.name);
     if (!ok) {
       if (prevId !== activeTabId && docTabs.some((t) => t.id === prevId)) switchToTab(prevId);
       return;
     }
   }
+  // Re-locate index in case tabs mutated during save
+  const currentIdx = docTabs.findIndex((t) => t.id === id);
+  if (currentIdx < 0) return;
+
   if (docTabs.length <= 1) {
     // Last tab: reset to a clean Untitled document
     state.path = null;
@@ -168,11 +177,10 @@ export async function closeTab(id: string): Promise<void> {
     return;
   }
   const wasActive = id === activeTabId;
-  docTabs.splice(idx, 1);
+  docTabs.splice(currentIdx, 1);
   if (wasActive) {
-    const next = docTabs[Math.min(idx, docTabs.length - 1)];
-    activeTabId = "";
-    switchToTab(next.id);
+    const next = docTabs[Math.min(currentIdx, docTabs.length - 1)];
+    switchToTab(next.id, true);
   } else {
     emit("tabs:change");
   }
@@ -217,15 +225,91 @@ function applyDocVisuals(): void {
   emit("page:change");
 }
 
-export async function confirmDiscard(): Promise<boolean> {
-  if (!state.dirty) return true;
-  const choice = await message(`Do you want to save changes to "${state.name}"?`, {
-    title: "Typo",
-    kind: "warning",
-    buttons: { yes: "Save", no: "Don't Save", cancel: "Cancel" },
+function askSaveDiscardModal(docName: string): Promise<"save" | "discard" | "cancel"> {
+  return new Promise((resolve) => {
+    const root = document.getElementById("overlay-root") || document.body;
+    let settled = false;
+    const finish = (choice: "save" | "discard" | "cancel") => {
+      if (settled) return;
+      settled = true;
+      window.removeEventListener("keydown", onKey, true);
+      scrim.remove();
+      resolve(choice);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        finish("cancel");
+      }
+    };
+    window.addEventListener("keydown", onKey, true);
+
+    const scrim = h(
+      "div",
+      {
+        class: "scrim scrim--in",
+        onmousedown: (e: MouseEvent) => {
+          if (e.target === scrim) finish("cancel");
+        },
+      },
+      h(
+        "div",
+        { class: "modal discard-modal" },
+        h(
+          "div",
+          { class: "discard-modal__head" },
+          icon("AlertTriangle", 18),
+          h("h2", { class: "modal__title" }, `Save changes to "${docName}"?`),
+        ),
+        h(
+          "p",
+          { class: "discard-modal__desc" },
+          "Your document has unsaved edits. Would you like to save before closing this tab, or close without saving?",
+        ),
+        h(
+          "div",
+          { class: "modal__actions discard-modal__actions" },
+          h(
+            "button",
+            {
+              type: "button",
+              class: "btn",
+              onclick: () => finish("cancel"),
+            },
+            "Cancel",
+          ),
+          h(
+            "button",
+            {
+              type: "button",
+              class: "btn btn--danger",
+              onclick: () => finish("discard"),
+            },
+            icon("Trash2", 14),
+            "Don't Save",
+          ),
+          h(
+            "button",
+            {
+              type: "button",
+              class: "btn btn--primary",
+              onclick: () => finish("save"),
+            },
+            icon("Save", 14),
+            "Save",
+          ),
+        ),
+      ),
+    );
+    root.append(scrim);
   });
-  if (choice === "Yes" || choice === "Save") return await save();
-  if (choice === "No" || choice === "Don't Save") {
+}
+
+export async function confirmDiscard(targetName?: string): Promise<boolean> {
+  if (!state.dirty) return true;
+  const choice = await askSaveDiscardModal(targetName || state.name);
+  if (choice === "save") return await save();
+  if (choice === "discard") {
     await native.clearAutosave().catch(() => {});
     return true;
   }
@@ -277,6 +361,8 @@ export async function newFromPreset(preset: DocumentPreset, force = false): Prom
     ...basePage,
     ...(preset.page ?? {}),
     margins: { ...basePage.margins, ...(preset.page?.margins ?? {}) },
+    doodleUnder: undefined,
+    doodleOver: undefined,
   };
   state.defaults = {
     fontFamily: preset.defaults?.fontFamily ?? settings.defaultFont,
@@ -289,7 +375,11 @@ export async function newFromPreset(preset: DocumentPreset, force = false): Prom
   emit("dirty:change", false);
   emit("document:new");
   emit("tabs:change");
-  if (preset.id !== "blank") {
+  if (preset.id === "brainstorm") {
+    enableDoodleMode("pencil", "over");
+    toast("Brainstorm canvas ready (Landscape + Pencil Draw Tool active)", "success", 2400);
+  } else if (preset.id !== "blank") {
+    toggleDoodleMode(false);
     toast(`Loaded "${preset.name}" preset`, "success", 1800);
   }
 }
@@ -467,9 +557,14 @@ export async function save(): Promise<boolean> {
   return writeDocx(state.path);
 }
 
+export async function saveDocxDirect(path: string): Promise<boolean> {
+  return writeDocx(path);
+}
+
 async function writeDocx(path: string): Promise<boolean> {
   try {
     const t0 = performance.now();
+    commitDoodleToPageState(false);
     await native.saveDocx(path, state.editor.getJSON(), state.page, state.defaults, baseName(state.name));
     state.path = path;
     state.name = path.split(/[\\/]/).pop() ?? state.name;
@@ -637,14 +732,146 @@ ${editor.getHTML()}
 `;
 }
 
-export function printDocument(): void {
+export function executeNativePrint(mode: "color" | "bw", bwWhitePaper = false): void {
+  const htmlEl = document.documentElement;
+  htmlEl.dataset.printMode = mode;
+  htmlEl.dataset.printWhitePaper = bwWhitePaper ? "on" : "off";
+
   const prevTitle = document.title;
   document.title = "";
   const restore = () => {
     document.title = prevTitle;
+    delete htmlEl.dataset.printMode;
+    delete htmlEl.dataset.printWhitePaper;
     window.removeEventListener("afterprint", restore);
   };
   window.addEventListener("afterprint", restore);
   window.print();
-  setTimeout(restore, 1000);
+  setTimeout(restore, 1400);
 }
+
+export function printDocument(): void {
+  const root = document.getElementById("overlay-root") || document.body;
+  let selectedMode: "color" | "bw" = settings.printColorMode || "color";
+  let bwWhitePaper = Boolean(settings.printBwWhitePaper);
+
+  const close = () => scrim.remove();
+
+  const colorCard = h(
+    "button",
+    {
+      type: "button",
+      class: `print-mode-card ${selectedMode === "color" ? "is-active" : ""}`,
+      onclick: () => {
+        selectedMode = "color";
+        syncUi();
+      },
+    },
+    h("div", { class: "print-mode-card__icon print-mode-card__icon--color" }, icon("Palette", 20)),
+    h(
+      "div",
+      { class: "print-mode-card__body" },
+      h("strong", {}, "Full Color · Match Screen 1:1"),
+      h(
+        "span",
+        {},
+        "Prints the exact paper color, paper texture, text colors, highlights, inserted images, stickers, and doodles you see on your canvas.",
+      ),
+    ),
+  );
+
+  const bwCard = h(
+    "button",
+    {
+      type: "button",
+      class: `print-mode-card ${selectedMode === "bw" ? "is-active" : ""}`,
+      onclick: () => {
+        selectedMode = "bw";
+        syncUi();
+      },
+    },
+    h("div", { class: "print-mode-card__icon print-mode-card__icon--bw" }, icon("Contrast", 20)),
+    h(
+      "div",
+      { class: "print-mode-card__body" },
+      h("strong", {}, "Black & White · Monochrome"),
+      h(
+        "span",
+        {},
+        "Converts the entire page — including paper tone, text, images, and doodles — into clean monochrome grayscale.",
+      ),
+    ),
+  );
+
+  const whitePaperChk = h("input", {
+    type: "checkbox",
+    checked: bwWhitePaper,
+    onchange: (e: Event) => {
+      bwWhitePaper = (e.target as HTMLInputElement).checked;
+    },
+  }) as HTMLInputElement;
+
+  const bwOptionsRow = h(
+    "label",
+    { class: "print-modal__chk", hidden: selectedMode !== "bw" },
+    whitePaperChk,
+    h("span", {}, "Ink-Saver Mode: Force pure white paper background in Black & White mode"),
+  );
+
+  function syncUi(): void {
+    colorCard.classList.toggle("is-active", selectedMode === "color");
+    bwCard.classList.toggle("is-active", selectedMode === "bw");
+    bwOptionsRow.hidden = selectedMode !== "bw";
+  }
+
+  const scrim = h(
+    "div",
+    {
+      class: "scrim scrim--in",
+      onmousedown: (e: MouseEvent) => {
+        if (e.target === scrim) close();
+      },
+    },
+    h(
+      "div",
+      { class: "modal print-studio-modal" },
+      h(
+        "div",
+        { class: "preflight__head" },
+        h("div", { class: "preflight__title" }, icon("Printer", 18), h("h2", { class: "modal__title" }, "Print Document")),
+        h("button", { type: "button", class: "scratchpad__close", onclick: close }, icon("X", 15)),
+      ),
+      h(
+        "p",
+        { class: "discard-modal__desc" },
+        "Choose how your document should look when printed or saved to a system PDF printer:",
+      ),
+      h("div", { class: "print-mode-grid" }, colorCard, bwCard),
+      bwOptionsRow,
+      h(
+        "div",
+        { class: "modal__actions" },
+        h("button", { type: "button", class: "btn", onclick: close }, "Cancel"),
+        h(
+          "button",
+          {
+            type: "button",
+            class: "btn btn--primary",
+            onclick: () => {
+              settings.printColorMode = selectedMode;
+              settings.printBwWhitePaper = bwWhitePaper;
+              saveSettings();
+              close();
+              executeNativePrint(selectedMode, bwWhitePaper);
+            },
+          },
+          icon("Printer", 14),
+          "Continue to Print",
+        ),
+      ),
+    ),
+  );
+
+  root.append(scrim);
+}
+

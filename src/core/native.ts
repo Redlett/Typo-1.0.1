@@ -18,6 +18,15 @@ export interface PageSettings {
   pageBorder?: PageBorderStyle;
   hyphenation?: boolean;
   baselineGrid?: boolean;
+  doodleUnder?: string;
+  doodleOver?: string;
+}
+export interface ProjectFileEntry {
+  name: string;
+  path: string;
+  kind: string;
+  modified: number;
+  size: number;
 }
 export interface DocDefaults { fontFamily: string; fontSize: number }
 export interface ImportedDocx { doc: any; page: PageSettings; defaults: DocDefaults }
@@ -151,6 +160,13 @@ export const native = {
   checkAppUpdate: (repo: string) => invoke<UpdateCheckResult>("check_app_update", { repo }),
   installAppUpdate: (downloadUrl: string, assetName: string) =>
     invoke<string>("install_app_update", { downloadUrl, assetName }),
+  defaultProjectsDir: () => invoke<string>("default_projects_dir"),
+  createProjectFolder: (parentDir: string, name: string) =>
+    invoke<string>("create_project_folder", { parentDir, name }),
+  listProjectFiles: (folder: string) => invoke<ProjectFileEntry[]>("list_project_files", { folder }),
+  deleteProjectFile: (path: string) => invoke<void>("delete_project_file", { path }),
+  renameProjectFile: (oldPath: string, newName: string) =>
+    invoke<string>("rename_project_file", { oldPath, newName }),
 };
 
 /** Page sizes in inches (portrait). */

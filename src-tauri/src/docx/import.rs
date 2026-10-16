@@ -95,9 +95,20 @@ pub fn import_docx(bytes: &[u8]) -> Result<ImportedDocx, String> {
     if blocks.is_empty() {
         blocks.push(json!({ "type": "paragraph" }));
     }
-    let page = body
+    let mut page = body
         .map(|b| section_settings(b, &mut conv.pkg, &conv.rels))
         .unwrap_or_default();
+    if let Some(doodle_xml) = conv.pkg.read_text("customXml/typo_doodles.xml") {
+        if let Ok(ddoc) = Document::parse(&doodle_xml) {
+            let root = ddoc.root_element();
+            if let Some(u) = root.attribute("under").filter(|s| !s.is_empty()) {
+                page.doodle_under = Some(u.to_string());
+            }
+            if let Some(o) = root.attribute("over").filter(|s| !s.is_empty()) {
+                page.doodle_over = Some(o.to_string());
+            }
+        }
+    }
 
     Ok(ImportedDocx { doc: json!({ "type": "doc", "content": blocks }), page, defaults })
 }
@@ -1744,6 +1755,8 @@ fn section_settings(body: Node, pkg: &mut Package, rels: &HashMap<String, Rel>) 
         header,
         footer,
         page_numbers,
+        doodle_under: None,
+        doodle_over: None,
     }
 }
 

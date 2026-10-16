@@ -36,6 +36,10 @@ pub struct PageSettings {
     pub footer: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub page_numbers: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub doodle_under: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub doodle_over: Option<String>,
 }
 
 impl Default for PageSettings {
@@ -47,6 +51,8 @@ impl Default for PageSettings {
             header: None,
             footer: None,
             page_numbers: None,
+            doodle_under: None,
+            doodle_over: None,
         }
     }
 }

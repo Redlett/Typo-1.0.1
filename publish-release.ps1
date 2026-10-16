@@ -17,8 +17,9 @@
 #>
 param(
     [string]$Version = "",
-    [string]$Repo = "",
-    [string]$Notes = "Typo Desktop Suite release build."
+    [string]$Repo = "Redlett/Typo-1.0.1",
+    [string]$Notes = "Typo Desktop Suite release update.",
+    [bool]$PushGit = $true
 )
 
 $ErrorActionPreference = "Stop"
@@ -111,19 +112,70 @@ try {
 Write-Host "`n  -> Installer ready: $outSetup" -ForegroundColor Green
 Write-Host "  -> Portable ready : $outPortable`n" -ForegroundColor Green
 
-# 4. Optional GitHub Release upload
+# 4. Auto-Sync Source Code & Publish GitHub Release
+if ($PushGit -and (Test-Path (Join-Path $ProjectRoot ".git"))) {
+    Write-Host "[4/5] Syncing source code to GitHub ($Repo)..." -ForegroundColor Yellow
+    git add .
+    $status = git status --porcelain
+    if (-not [string]::IsNullOrWhiteSpace($status)) {
+        git commit -m "Release Typo v$Version"
+    }
+    git push origin main
+}
+
 if (-not [string]::IsNullOrWhiteSpace($Repo)) {
-    Write-Host "[4/4] Publishing v$Version to GitHub Releases ($Repo)..." -ForegroundColor Yellow
+    Write-Host "[5/5] Publishing v$Version installer to GitHub Releases ($Repo)..." -ForegroundColor Yellow
     if (Get-Command gh -ErrorAction SilentlyContinue) {
-        $assets = @($outPortable)
-        if (Test-Path $outSetup) { $assets += $outSetup }
-        gh release create "v$Version" @assets --repo $Repo --title "Typo v$Version" --notes $Notes
+        $assets = @($outSetup)
+        gh release create "$Version" @assets --repo $Repo --title "Typo v$Version" --notes $Notes
         if ($LASTEXITCODE -eq 0) {
-            Write-Host "`nPublished Typo v$Version to https://github.com/$Repo/releases/tag/v$Version !" -ForegroundColor Green
+            Write-Host "`nPublished Typo v$Version to https://github.com/$Repo/releases/tag/$Version !" -ForegroundColor Green
         }
     } else {
-        Write-Host "GitHub CLI ('gh') not found. Upload '$outSetup' manually to https://github.com/$Repo/releases/new with tag 'v$Version'." -ForegroundColor Yellow
+        try {
+            $credInput = "protocol=https`nhost=github.com`n`n"
+            $credOut = $credInput | git credential fill 2>$null
+            $tokenLine = ($credOut -split "`r?`n") | Where-Object { $_ -match '^password=' } | Select-Object -First 1
+            if ($tokenLine) {
+                $token = $tokenLine -replace '^password=', ''
+                $headers = @{
+                    "Authorization" = "Bearer $token"
+                    "Accept"        = "application/vnd.github+json"
+                    "User-Agent"    = "Typo-Release-Publisher"
+                }
+                $relBody = @{
+                    tag_name         = "$Version"
+                    target_commitish = "main"
+                    name             = "Typo v$Version"
+                    body             = $Notes
+                    draft            = $false
+                    prerelease       = $false
+                } | ConvertTo-Json -Depth 5
+
+                try {
+                    $release = Invoke-RestMethod -Uri "https://api.github.com/repos/$Repo/releases" -Method Post -Headers $headers -Body $relBody -ContentType "application/json; charset=utf-8"
+                } catch {
+                    $release = Invoke-RestMethod -Uri "https://api.github.com/repos/$Repo/releases/tags/$Version" -Method Get -Headers $headers
+                }
+
+                if ($release -and (Test-Path $outSetup)) {
+                    $assetName = [System.IO.Path]::GetFileName($outSetup)
+                    $uploadUrl = ($release.upload_url -replace '\{\?name,label\}$', '') + "?name=$assetName"
+                    foreach ($existing in $release.assets) {
+                        if ($existing.name -eq $assetName) {
+                            Invoke-RestMethod -Uri "https://api.github.com/repos/$Repo/releases/assets/$($existing.id)" -Method Delete -Headers $headers | Out-Null
+                        }
+                    }
+                    $fileBytes = [System.IO.File]::ReadAllBytes($outSetup)
+                    Invoke-RestMethod -Uri $uploadUrl -Method Post -Headers $headers -Body $fileBytes -ContentType "application/vnd.microsoft.portable-executable" | Out-Null
+                    Write-Host "`n  -> Auto-published Release & Installer to: https://github.com/$Repo/releases/tag/$Version" -ForegroundColor Green
+                }
+            } else {
+                Write-Host "  -> Upload '$outSetup' to https://github.com/$Repo/releases/new (tag: $Version)" -ForegroundColor Yellow
+            }
+        } catch {
+            Write-Host "  -> Note: Could not auto-upload release asset ($($_.Exception.Message)). Upload '$outSetup' manually if needed." -ForegroundColor Yellow
+        }
     }
-} else {
-    Write-Host "[4/4] Done! Share '$outSetup' with your friends, or pass -Repo 'username/typo-releases' to auto-publish to GitHub." -ForegroundColor Cyan
 }
+
