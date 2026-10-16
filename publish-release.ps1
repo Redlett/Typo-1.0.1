@@ -139,7 +139,9 @@ if (-not [string]::IsNullOrWhiteSpace($Repo)) {
             $psi.RedirectStandardError = $true
             $psi.UseShellExecute = $false
             $proc = [System.Diagnostics.Process]::Start($psi)
-            $proc.StandardInput.Write("protocol=https" + [char]10 + "host=github.com" + [char]10 + [char]10)
+            $credBytes = [System.Text.Encoding]::ASCII.GetBytes("protocol=https" + [char]10 + "host=github.com" + [char]10 + [char]10)
+            $proc.StandardInput.BaseStream.Write($credBytes, 0, $credBytes.Length)
+            $proc.StandardInput.BaseStream.Flush()
             $proc.StandardInput.Close()
             $credOut = $proc.StandardOutput.ReadToEnd()
             $proc.WaitForExit()
