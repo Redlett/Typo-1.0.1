@@ -1,10 +1,10 @@
-# Typo — Focused Document & Publishing Studio
+# Typo — A fast, private, and Vibe-Coded Microsoft Word Alternative with customizable features.
 
 **Typo** is a native Windows desktop word processor, EPUB 3.0 e-book studio, and visual PDF editor built with **Tauri 2 (Rust + WebView2)** and **TypeScript**.
 
 ---
 
-## ✨ Key Features
+##  Key Features
 
 - **Rich Document Studio**: Full `.docx`, `.md`, `.html`, `.txt`, and `.typo` native editing with live multi-page pagination, headers & footers, customizable margins, tables, equations, and callouts.
 - **Visual PDF Editor Suite**: Dedicated 1:1 visual PDF canvas with direct text-block editing, image replacement/deletion, freeform callouts, highlights, signatures, and lossless PDF export.
@@ -15,7 +15,7 @@
 
 ---
 
-## 📦 Download & Install
+##  Download & Install
 
 Grab the latest **`Typo_1.0.1_x64-setup.exe`** installer from the [**Releases**](https://github.com/Redlett/Typo-1.0.1/releases) page.
 
