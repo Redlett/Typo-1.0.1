@@ -133,8 +133,16 @@ if (-not [string]::IsNullOrWhiteSpace($Repo)) {
         }
     } else {
         try {
-            $credInput = "protocol=https`nhost=github.com`n`n"
-            $credOut = $credInput | git credential fill 2>$null
+            $psi = New-Object System.Diagnostics.ProcessStartInfo("git", "credential fill")
+            $psi.RedirectStandardInput = $true
+            $psi.RedirectStandardOutput = $true
+            $psi.RedirectStandardError = $true
+            $psi.UseShellExecute = $false
+            $proc = [System.Diagnostics.Process]::Start($psi)
+            $proc.StandardInput.Write("protocol=https`nhost=github.com`n`n")
+            $proc.StandardInput.Close()
+            $credOut = $proc.StandardOutput.ReadToEnd()
+            $proc.WaitForExit()
             $tokenLine = ($credOut -split "`r?`n") | Where-Object { $_ -match '^password=' } | Select-Object -First 1
             if ($tokenLine) {
                 $token = $tokenLine -replace '^password=', ''
